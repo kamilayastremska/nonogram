@@ -165,6 +165,27 @@
   .cell.x.err { background: color-mix(in srgb, var(--mark) 28%, transparent); }
   .board.won .cell { cursor: default; }
 
+  /* победа: линии и числа гаснут, клетки проявляются цветом */
+  .board.won, .board.won .cell, .board.won .cell.r5, .board.won .cell.b5 {
+    border-color: transparent; transition: border-color .6s;
+  }
+  .game.won .col-clues, .game.won .row-clues { opacity: 0; transition: opacity .6s; }
+  .cell.f.reveal {
+    background: var(--c);
+    animation: pop .55s ease-out var(--d) both;
+    transition: background .5s ease var(--d);
+  }
+  @keyframes pop { 0% { transform: scale(1); } 45% { transform: scale(1.25); } 100% { transform: scale(1); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .pic-name { display: block; font-size: 1.7rem; font-weight: 800; animation: rise .6s ease .7s both; }
+  .stats { display: block; font-size: .9rem; font-weight: 500; opacity: .7; margin-top: 2px; animation: rise .6s ease .85s both; }
+  #again { margin-top: 12px; }
+  @media (prefers-reduced-motion: reduce) {
+    .cell.f.reveal { animation: none; transition: none; }
+    .pic-name, .stats { animation: none; }
+    .board.won, .board.won .cell, .game.won .col-clues, .game.won .row-clues { transition: none; }
+  }
+
   #msg { margin-top: 16px; min-height: 1.6em; font-weight: 600; font-size: 1.05rem; text-align: center; }
   .help { margin-top: 10px; font-size: .85rem; opacity: .7; text-align: center; max-width: 440px; line-height: 1.45; }
 
@@ -234,6 +255,7 @@
 
   <button id="mode" class="toggle" aria-pressed="false">Кисть: ■ закраска</button>
   <div id="msg" role="status"></div>
+  <button id="again" class="primary" hidden>Ещё картинку</button>
   <p class="help">Левая кнопка мыши закрашивает клетку, правая ставит крестик. Можно вести мышью. На телефоне кнопка «Кисть» переключает закраску и крестик.</p>
 </section>
 
@@ -266,13 +288,13 @@
   const $ = id => document.getElementById(id);
   const titleEl = $('title'), playEl = $('play');
   const boardEl = $('board'), colEl = $('colClues'), rowEl = $('rowClues');
-  const msgEl = $('msg'), timerEl = $('timer'), errsEl = $('errs'), modeBtn = $('mode');
+  const againBtn = $('again'), msgEl = $('msg'), timerEl = $('timer'), errsEl = $('errs'), modeBtn = $('mode');
 
   const LEVELS = {
     easy:   { name: 'Лёгкий',   n: 5,  p: 0.62 },
-    medium: { name: 'Средний',  n: 10, p: 0.58 },
-    hard:   { name: 'Сложный',  n: 15, p: 0.55 },
-    expert: { name: 'Эксперт',  n: 20, p: 0.52 }
+    medium: { name: 'Средний',  n: 10 },
+    hard:   { name: 'Сложный',  n: 15 },
+    expert: { name: 'Эксперт',  n: 20 }
   };
 
   // ---------- настройки (хранятся в браузере) ----------
@@ -281,8 +303,8 @@
   try { Object.assign(settings, JSON.parse(localStorage.getItem(SKEY) || '{}')); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) {} };
 
-  let level = LEVELS.medium, n = 10, unique = true, mistakes = 0;
-  let solution = [], grid = [], rowC = [], colC = [];
+  let level = LEVELS.medium, levelKey = 'medium', pic = null, n = 10, mistakes = 0;
+  let solution = [], colors = [], grid = [], rowC = [], colC = [];
   let cells = [], won = false, xMode = false;
   let timerId = null, seconds = 0;
 
@@ -300,81 +322,84 @@
   const column = (g, c) => g.map(row => row[c]);
   const filled = line => line.map(v => (v === 1 ? 1 : 0));
 
-  // <solver>
-  // Решает одну строку: known[i] = -1 (неизвестно), 0 или 1.
-  // Возвращает уточнённую строку или null при противоречии.
-  function solveLine(clue, known) {
-    const L = known.length;
-    const and = Array(L).fill(1), or = Array(L).fill(0), cur = Array(L).fill(0);
-    let count = 0;
-    const need = clue.map((_, k) => clue.slice(k).reduce((a, b) => a + b + 1, -1));
-    function place(j, pos) {
-      if (j === clue.length) {
-        for (let i = pos; i < L; i++) if (known[i] === 1) return;
-        for (let i = pos; i < L; i++) cur[i] = 0;
-        count++;
-        for (let i = 0; i < L; i++) { and[i] &= cur[i]; or[i] |= cur[i]; }
-        return;
-      }
-      const len = clue[j], maxStart = L - need[j];
-      for (let s = pos; s <= maxStart; s++) {
-        if (s > pos && known[s - 1] === 1) break;
-        let ok = true;
-        for (let i = s; i < s + len; i++) if (known[i] === 0) { ok = false; break; }
-        if (!ok) continue;
-        if (s + len < L && known[s + len] === 1) continue;
-        for (let i = pos; i < s; i++) cur[i] = 0;
-        for (let i = s; i < s + len; i++) cur[i] = 1;
-        if (s + len < L) cur[s + len] = 0;
-        place(j + 1, s + len + 1);
-      }
-    }
-    place(0, 0);
-    if (!count) return null;
-    return and.map((a, i) => (a ? 1 : or[i] ? -1 : 0));
+  // ---------- картинки ----------
+  // '.' = пусто, буква = цвет из PALETTE. Все головоломки проверены решателем:
+  // решение единственное и находится логикой, без угадывания.
+  const PALETTE = {
+    r: '#e0455c', q: '#ff9aa8', y: '#f4b400', o: '#e8913a', p: '#f06fa4',
+    k: '#1d2848', d: '#c4492f', x: '#8c96a5', c: '#f2d7a6', n: '#8a5a3b',
+    l: '#6aa9e0', b: '#3d8bd9', w: '#f6efe0', g: '#3f9c4a', h: '#ffe28a'
+  };
+  // заглавная буква = тот же цвет, но темнее (тень у нижнего и правого края)
+  for (const k of Object.keys(PALETTE)) {
+    const v = parseInt(PALETTE[k].slice(1), 16);
+    const ch = sh => Math.round(sh * 0.76).toString(16).padStart(2, '0');
+    PALETTE[k.toUpperCase()] = '#' + ch(v >> 16) + ch((v >> 8) & 255) + ch(v & 255);
   }
-
-  // Решает головоломку «по строкам и столбцам». complete = true, если решение однозначно найдено.
-  function solvePuzzle(rc, cc, size) {
-    const g = Array.from({ length: size }, () => Array(size).fill(-1));
-    const rcl = rc.map(a => a.filter(v => v > 0)), ccl = cc.map(a => a.filter(v => v > 0));
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let r = 0; r < size; r++) {
-        const res = solveLine(rcl[r], g[r]);
-        if (!res) return { grid: g, complete: false };
-        for (let c = 0; c < size; c++) if (g[r][c] !== res[c]) { g[r][c] = res[c]; changed = true; }
-      }
-      for (let c = 0; c < size; c++) {
-        const res = solveLine(ccl[c], g.map(row => row[c]));
-        if (!res) return { grid: g, complete: false };
-        for (let r = 0; r < size; r++) if (g[r][c] !== res[r]) { g[r][c] = res[r]; changed = true; }
-      }
-    }
-    return { grid: g, complete: g.every(row => row.every(v => v !== -1)) };
+  const PICTURES = {
+    easy: [
+      { name: "Сердце", rows: [".r.r.", "rrrrr", "rrrrr", ".rrr.", "..r.."] },
+      { name: "Смайлик", rows: [".yyy.", "ykyky", "yyyyy", "ykkky", ".yyy."] },
+      { name: "Домик", rows: ["..d..", ".ddd.", "ddddd", "cncbc", "cncbc"] },
+      { name: "Дерево", rows: [".ggg.", "ggggg", "ggggg", "..n..", "..n.."] },
+      { name: "Звезда", rows: ["..y..", "yyyyy", ".yyy.", "yy.yy", "y...y"] },
+      { name: "Гриб", rows: [".ddd.", "dwddd", "dddwd", "..c..", "..c.."] },
+      { name: "Рыбка", rows: ["..b..", "bbbbo", "bkbbo", "bbbbo", "..b.."] },
+      { name: "Мороженое", rows: ["..r..", ".ppp.", "ppppp", ".ccc.", "..c.."] },
+      { name: "Кактус", rows: ["..g..", "g.g.g", "ggggg", "..g..", ".ddd."] },
+      { name: "Бабочка", rows: ["pp.pp", "pbkbp", ".pkp.", "bbkbb", "b.k.b"] },
+    ],
+    medium: [
+      { name: "Сердце", rows: ["..........", ".rrR..rrR.", "rrqrrrrrrR", "rrqrrrrrrR", "RrrrrrrrrR", ".RrrrrrrR.", "..RrrrrR..", "...RrrR...", "....RR....", ".........."] },
+      { name: "Звезда", rows: ["....yY....", "....yY....", "...yyyY...", "YyyyyyyyyY", ".YyyyyyyY.", "..yyyyyY..", "..yyYYyY..", ".yyY..YyY.", ".YY....YY.", ".........."] },
+      { name: "Кот", rows: ["..........", "..O....O..", ".opO..opO.", ".opoooopO.", ".oooooooO.", ".ookookoO.", ".oooooooO.", ".OooooooO.", "..OOOOOO..", ".........."] },
+      { name: "Домик", rows: ["..........", "....dD.X..", "...ddddX..", "..dddddD..", ".DddddddD.", "..cccccC..", "..llcclL..", "..ccnncC..", "..CCNNCC..", ".........."] },
+      { name: "Гриб", rows: ["..........", "...dddD...", "..ddddwD..", ".ddwddddD.", "DDDddddwDD", "...cccC...", "...cccC...", "...cccC...", "...CCCC...", ".........."] },
+      { name: "Рыбка", rows: ["..........", "..........", "....oO...O", ".bbbbbB.oO", "bbwbbbbboO", "BbbbbbbBoO", ".BBBBBB.OO", ".........O", "..........", ".........."] },
+      { name: "Мороженое", rows: ["..........", "...pppP...", "...pppP...", "...pppP...", "..PppppP..", "...PppP...", "....cC....", "....CC....", "..........", ".........."] },
+      { name: "Кактус", rows: ["..........", "....gG....", ".G..gG....", ".G..gG..G.", ".GGGgG..G.", "....ggGGG.", "....gG....", "....gG....", "...dddD...", "...DDDD..."] },
+      { name: "Бабочка", rows: ["..........", "..pP..pP..", ".pppppppP.", ".pwppppwP.", ".PppPPppP.", "..bB..bB..", "..bbbkbB..", "..bbBkbB..", "..BB..BB..", ".........."] },
+      { name: "Лодка", rows: ["..........", ".....N....", "....nw....", "....qww...", "...qqwww..", "..qqqwww..", ".DqqddwwD.", "..dddddD..", "..dddddD..", "LLLLLLLLLL"] },
+      { name: "Дерево", rows: ["..........", "...gggG...", "..gggggG..", "..gggggG..", ".gggggggG.", ".GggggggG.", "..GGnnGG..", "....nN....", "....NN....", ".........."] },
+      { name: "Яблоко", rows: ["..........", ".....ngG..", ".....ngG..", "..rrrrrR..", ".rrrrrrrR.", ".rrrrrrrR.", ".RrrrrrrR.", "..RRRRRR..", "..........", ".........."] },
+    ],
+    hard: [
+      { name: "Сердце", rows: ["...............", "...............", "...rrR...rrR...", "..rrrrrrrrrrR..", ".rrqqrrrrrrrrR.", ".rrrrrrrrrrrrR.", ".RrrrrrrrrrrrR.", "..RrrrrrrrrrR..", "...RrrrrrrrR...", "....RrrrrrR....", ".....rrrrR.....", ".....RrrrR.....", "......RrR......", ".......R.......", "..............."] },
+      { name: "Звезда", rows: ["...............", ".......Y.......", ".......Y.......", "......yyY......", "......yyY......", "......yyY......", ".YyyyyyhyyyyyY.", "..YYyhhhhhyYY..", "....yyhhhyY....", "....yyhhhyY....", "....yyyyyyY....", "....yyYYYyY....", "....YY...YY....", "...Y.......Y...", "..............."] },
+      { name: "Кот", rows: ["...............", "..oO.......oO..", "..ooO.....ooO..", "..oppO...oppO..", "..oppoooooppO..", "..ooooooooooO..", "..ooooooooooO..", "..ookkoookkoO..", "..oookoookooO..", "..ooooooooooO..", "..ooooooooooO..", "..OoooooooooO..", "...OOoooooOO...", ".....OOOOO.....", "..............."] },
+      { name: "Домик", rows: ["...............", "...............", "......ddD.xX...", ".....dddddxX...", "....dddddddX...", "...ddddddddD...", "..ddddddddddD..", "..ccccccccccC..", "..cclccccclcC..", "..ccllcccllcC..", "..cclcnnnclcC..", "..ccccnnncccC..", "..CcccnnncccC..", "...CCCNNNCCC...", "..............."] },
+      { name: "Гриб", rows: ["...............", "...............", "....ddddddD....", "...ddddddwdD...", "..ddwwddwwddD..", ".dddwwdddddddD.", ".ddddddwddwwdD.", ".DDDDdddddDDDD.", ".....ccccC.....", ".....ccccC.....", ".....ccccC.....", ".....ccccC.....", ".....ccccC.....", ".....CCCCC.....", "..............."] },
+      { name: "Рыбка", rows: ["...............", "...............", "......oO.......", ".....ooO.....oO", "..bbbbbbbB..ooO", ".bbbbbbbbbboooO", ".bbwwbbbbbboooO", ".bbbbbbbbbboooO", ".BbbbbbbbbBOooO", "..BBbbbbBB..OoO", "....BBBB.....OO", "..............O", "...............", "...............", "..............."] },
+      { name: "Мороженое", rows: ["...............", ".......R.......", ".....pprpP.....", "....ppppppP....", "....ppppppP....", "....ppppppP....", "....ppppppP....", "...PpppppppP...", "....PpppppP....", ".....CcccC.....", "......ccC......", "......CcC......", ".......C.......", ".......C.......", "..............."] },
+      { name: "Кактус", rows: ["...............", "......gpG......", "......ggG......", "..gG..ggG......", "..gG..ggG...G..", "..gG..ggG..gG..", "..ggggggG..gG..", "..GGGGggggggG..", "......gggGGGG..", "......ggG......", "......ggG......", "......ggG......", "....ddddddD....", "....DDDDDDD....", "..............."] },
+      { name: "Бабочка", rows: ["...............", "...............", "..pppP...pppP..", ".pppppP.pppppP.", ".ppwwppkppwwpP.", ".ppwwppkppwwpP.", ".PppppPkPppppP.", "..PppP.k.pppP..", "...bbB.k.bbB...", "..bbbbbkbbbbB..", "..bbbbbkbbbbB..", "..BbbbBkBbbbB..", "...BBB...BBB...", "...............", "..............."] },
+      { name: "Лодка", rows: ["...............", "...............", ".......N.......", ".......nw......", "......qnww.....", ".....qqnwww....", "....qqqnwww....", "....qqqnwwww...", "...qqqqnwwwww..", ".......N.......", "..DdddddddddD..", "...ddddddddD...", "...ddddddddD...", "llllllllllllllL", "LLLLLLLLLLLLLLL"] },
+      { name: "Дерево", rows: ["...............", ".....ggggG.....", "....ggggggG....", "....ggggggG....", "...gggrggggG...", "..ggggggggggG..", "..gggggggrggG..", "..ggggggggggG..", "..ggggggggggG..", "..GGGGGnGGGGG..", ".......N.......", ".......N.......", ".......N.......", ".......N.......", "..............."] },
+      { name: "Яблоко", rows: ["...............", "...............", ".......ngggG...", ".......ngggG...", "....rrrnrrR....", "..rrrrrrrrrrR..", "..rrqrrrrrrrR..", ".rrrqrrrrrrrrR.", ".rrrrrrrrrrrrR.", ".RrrrrrrrrrrrR.", "..RrrrrrrrrrR..", "...RrrrrrrrR...", "....RRRRRRR....", "...............", "..............."] },
+    ],
+    expert: [
+      { name: "Сердце", rows: ["....................", "....................", "....................", "....rrrR....rrrR....", "...rrrrrrrrrrrrrR...", "..rrrqrrrrrrrrrrrR..", "..rrrqrrrrrrrrrrrR..", "..rrrrrrrrrrrrrrrR..", "..rrrrrrrrrrrrrrrR..", "..RrrrrrrrrrrrrrrR..", "...RrrrrrrrrrrrrR...", "....RrrrrrrrrrrR....", ".....RrrrrrrrrR.....", "......RrrrrrrR......", ".......rrrrrR.......", ".......RrrrrR.......", "........RrrR........", ".........RR.........", "....................", "...................."] },
+      { name: "Звезда", rows: ["....................", "....................", ".........yY.........", ".........yY.........", ".........yY.........", "........yyyY........", "........yyyY........", ".YyyyyyyyyyyyyyyyyY.", "..YyyyyyyhhyyyyyyY..", "...YyyyhhhhhhyyyY...", "....YYyhhhhhhyYY....", "......yyhhhhyY......", "......yyhhhhyY......", "......yyyyyyyY......", ".....yyyyYYyyyY.....", ".....yyYY..YYyY.....", ".....yY......YY.....", "....YY........YY....", "....................", "...................."] },
+      { name: "Кот", rows: ["....................", "....................", "...oO..........oO...", "...ooO........ooO...", "...oppO......oppO...", "...opppoooooopppO...", "...oppooooooooppO...", "...oooooooooooooO...", "..OooooooooooooooO..", "...oooooooooooooO...", "..ooookkooookkoooO..", "..ooookkooookkoooO..", "..oooooooooooooooO..", "..OooooooppooooooO..", "...oooooooooooooO...", "...OooooooooooooO...", "....OooooooooooO....", ".....OOOooooOOO.....", "........OOOO........", "...................."] },
+      { name: "Домик", rows: ["....................", "....................", ".........dD...xX....", "........dddD..xX....", ".......dddddD.xX....", "......ddddddddxX....", ".....ddddddddddX....", "....dddddddddddD....", "...dddddddddddddD...", "..DddddddddddddddD..", "...cccccccccccccC...", "...ccllccccccllcC...", "...ccllccccccllcC...", "...ccllcnnnncllcC...", "...cccccnnnnccccC...", "...cccccnnnnccccC...", "...cccccnnnnccccC...", "...CCCCCNNNNCCCCC...", "....................", "...................."] },
+      { name: "Гриб", rows: ["....................", "....................", ".......dddddD.......", ".....dddddddddD.....", "....ddddddddwddD....", "...ddddddddwwwddD...", "..dddwwwdddwwddddD..", ".ddddwwwddddddddddD.", ".dddddwwdddddwwdddD.", ".ddddddddwwdddwdddD.", ".DDDDDDddddddDDDDDD.", ".......cccccC.......", ".......cccccC.......", ".......cccccC.......", ".......cccccC.......", ".......cccccC.......", ".......cccccC.......", ".......CCCCCC.......", "....................", "...................."] },
+      { name: "Рыбка", rows: ["....................", "....................", ".........O..........", "........ooO.........", ".......oooO.......O.", "....bboooooO.....oO.", "...bbbbbbbbbB...ooO.", "..bbbbbbbbbbbbboooO.", ".bbbwkbbbbbbbbboooO.", ".bbbbwbbbbbbbbboooO.", ".bbbbbbbbbbbbbboooO.", ".BbbbbbbbbbbbbBOooO.", "..BBbbbbbbbbBB..OoO.", "....BBBBBBBB.....OO.", "..................O.", "....................", "....................", "....................", "....................", "...................."] },
+      { name: "Мороженое", rows: ["....................", ".........rR.........", "........prrP........", ".......pppppP.......", "......pppppppP......", ".....pppppppppP.....", ".....pppppppppP.....", ".....pppppppppP.....", ".....pppppppppP.....", ".....pppppppppP.....", ".....PppppppppP.....", "......PppppppP......", ".......cccccC.......", ".......CccccC.......", "........cccC........", "........CccC........", ".........cC.........", ".........CC.........", "....................", "...................."] },
+      { name: "Кактус", rows: ["....................", ".........pP.........", "........gggG........", "........gggG........", "...gG...gggG........", "...gG...gggG........", "...gG...gggG...gG...", "...gG...gggG...gG...", "...ggggggggG...gG...", "...GGGGGgggG...gG...", "........ggggggggG...", "........ggggGGGGG...", "........gggG........", "........gggG........", "........gggG........", "........gggG........", "......dddddddD......", "......dddddddD......", "......DDDDDDDD......", "...................."] },
+      { name: "Бабочка", rows: ["....................", "....................", "....ppP......ppP....", "..pppppP....pppppP..", "..ppppppP..ppppppP..", "..ppwwppP..pppwwpP..", ".pppwwwppkkppwwwppP.", ".PpppwpppkkpppwpppP.", "..pppppppkkppppppP..", "..PpppppPkkPpppppP..", "...PpppP.kk.ppppP...", "....bbbB.kk.bbbB....", "...bbbbbbkkbbbbbB...", "...bbbbbbkkbbbbbB...", "...bbbbbbkkbbbbbB...", "...BbbbbBkkBbbbbB...", "....BBBB....BBBB....", "....................", "....................", "...................."] },
+      { name: "Лодка", rows: ["....................", "....................", "..........w.........", "..........w.........", ".........nww........", "........qqwww.......", ".......qqqwwww......", ".......qqqwwww......", "......qqqqwwwww.....", ".....qqqqqwwwwww....", "....qqqqqqwwwwww....", "....qqqqqqwwwwwww...", "..........N.........", "..........D.........", "...dddddddddddddD...", "...DddddddddddddD...", "....DDDDDDDDDDDD....", "....................", "lllllllllllllllllllL", "LLLLLLLLLLLLLLLLLLLL"] },
+      { name: "Дерево", rows: ["....................", "........gggG........", "......gggggggG......", ".....gggggggggG.....", ".....gggggggggG.....", ".....gggrgggggG.....", "....ggggrggggggG....", "...gggggggggggggG...", "..ggggggggggrggggG..", "..gggggggggggggggG..", "..gggggggggggggggG..", "..GggggggggggggggG..", "...GggggGnnGggggG...", "....GGGG.nN.GGGG....", ".........nN.........", ".........nN.........", ".........nN.........", ".........nN.........", ".........NN.........", "...................."] },
+      { name: "Яблоко", rows: ["....................", "....................", "..........N.........", "..........nggggG....", "..........nGggGG....", "..........N.gG......", "....rrrrrrrrrrrR....", "...rrrrrrrrrrrrrR...", "..rrrqqrrrrrrrrrrR..", "..rrrqqrrrrrrrrrrR..", "..rrrrrrrrrrrrrrrR..", "..rrrrrrrrrrrrrrrR..", "..rrrrrrrrrrrrrrrR..", "..RrrrrrrrrrrrrrrR..", "...RrrrrrrrrrrrrR...", "....RrrrrrrrrrrR....", ".....RRRRRRRRRR.....", "....................", "....................", "...................."] },
+    ],
+  };
+  const lastPic = {};
+  function pickPicture(key) {
+    const list = PICTURES[key];
+    let pic;
+    do { pic = list[Math.floor(Math.random() * list.length)]; }
+    while (list.length > 1 && pic === lastPic[key]);
+    return (lastPic[key] = pic);
   }
-
-  // Случайная картинка, которую можно решить логикой: решение единственное,
-  // поэтому «ошибки» всегда честные.
-  function generateUnique(size, p) {
-    const sol = Array.from({ length: size }, () =>
-      Array.from({ length: size }, () => (Math.random() < p ? 1 : 0)));
-    for (let it = 0; it < 400; it++) {
-      const rc = sol.map(runs), cc = sol[0].map((_, c) => runs(column(sol, c)));
-      const res = solvePuzzle(rc, cc, size);
-      if (res.complete) return { sol, unique: true };
-      const un = [];
-      res.grid.forEach((row, r) => row.forEach((v, c) => { if (v === -1) un.push([r, c]); }));
-      const k = Math.max(1, Math.floor(un.length / 5));
-      for (let i = 0; i < k && un.length; i++) {
-        const [r, c] = un.splice(Math.floor(Math.random() * un.length), 1)[0];
-        sol[r][c] ^= 1;
-      }
-    }
-    return { sol, unique: false };
-  }
-  // </solver>
 
   // ---------- отрисовка (общая для игры и титульной картинки) ----------
   function render(size, bEl, cEl, rEl, rc, cc) {
@@ -414,7 +439,7 @@
   }
 
   // ошибка = закрашена клетка, которой нет в решении, или крестик на клетке из решения
-  const isBad = (r, c) => settings.errors && unique &&
+  const isBad = (r, c) => settings.errors &&
     ((grid[r][c] === 1 && solution[r][c] !== 1) || (grid[r][c] === 2 && solution[r][c] === 1));
 
   function paint(r, c) {
@@ -453,7 +478,7 @@
   // ---------- настройки: применение ----------
   function applySettings() {
     timerEl.hidden = !settings.timer;
-    errsEl.hidden = !settings.errors || !unique;
+    errsEl.hidden = !settings.errors;
     $('optErrors').checked = settings.errors;
     $('optTimer').checked = settings.timer;
     $('gameActions').hidden = playEl.hidden;
@@ -483,7 +508,7 @@
     $('gameActions').hidden = true;
   }
   function startLevel(key) {
-    level = LEVELS[key];
+    level = LEVELS[key]; levelKey = key;
     titleEl.hidden = true; playEl.hidden = false;
     $('levelName').textContent = level.name;
     newGame();
@@ -492,29 +517,41 @@
   // ---------- игра ----------
   function newGame() {
     n = level.n;
-    const g = generateUnique(n, level.p);
-    solution = g.sol; unique = g.unique;
+    pic = pickPicture(levelKey);
+    solution = pic.rows.map(row => [...row].map(ch => (ch === '.' ? 0 : 1)));
+    colors = pic.rows.map(row => [...row].map(ch => PALETTE[ch] || null));
     rowC = solution.map(runs);
     colC = solution[0].map((_, c) => runs(column(solution, c)));
     resetGrid();
   }
   function resetGrid() {
     grid = Array.from({ length: n }, () => Array(n).fill(0));
-    won = false; msgEl.textContent = ''; mistakes = 0; updateErrs();
+    won = false; msgEl.textContent = ''; againBtn.hidden = true; mistakes = 0; updateErrs();
     fitCell();
     cells = render(n, boardEl, colEl, rowEl, rowC, colC);
-    boardEl.classList.remove('won');
+    boardEl.classList.remove('won'); $('game').classList.remove('won');
     applySettings(); refreshClues(); startTimer();
   }
   function win() {
     won = true; clearInterval(timerId);
-    boardEl.classList.add('won');
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
       if (grid[r][c] === 2) { grid[r][c] = 0; paint(r, c); }
-    let text = 'Готово!';
-    if (settings.timer) text += ` Время: ${fmt(seconds)}.`;
-    if (settings.errors && unique) text += ` Ошибок: ${mistakes}.`;
-    msgEl.textContent = text;
+    // картинка проявляется цветом волной от центра
+    const mid = (n - 1) / 2;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (grid[r][c] !== 1) continue;
+      const el = cells[r][c];
+      el.style.setProperty('--c', colors[r][c]);
+      el.style.setProperty('--d', Math.round(Math.hypot(r - mid, c - mid) * 45) + 'ms');
+      el.classList.add('reveal');
+    }
+    boardEl.classList.add('won'); $('game').classList.add('won');
+    const stats = [];
+    if (settings.timer) stats.push(`время ${fmt(seconds)}`);
+    if (settings.errors) stats.push(`ошибок: ${mistakes}`);
+    msgEl.innerHTML = `<span class="pic-name">${pic.name}</span>` +
+      (stats.length ? `<span class="stats">${stats.join(', ')}</span>` : '');
+    againBtn.hidden = false;
   }
 
   // ---------- ввод ----------
@@ -565,6 +602,7 @@
     b.addEventListener('click', () => startLevel(b.dataset.level)));
   $('menu').onclick = showMenu;
   $('new').onclick = () => { dlg.close(); newGame(); };
+  againBtn.onclick = newGame;
   $('reset').onclick = () => { dlg.close(); resetGrid(); };
   modeBtn.onclick = () => {
     xMode = !xMode;
