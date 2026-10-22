@@ -433,8 +433,12 @@
   }
 
   function fitCell() {
-    const W = document.documentElement.clientWidth;
-    const cell = Math.max(20, Math.min(32, Math.floor((W - 40) / (1.5 * n))));
+    const W = document.documentElement.clientWidth, H = window.innerHeight;
+    const clueCells = Math.ceil(n / 2) * 0.46;            // место под числа
+    const byW = Math.floor((W - 48) / (n + clueCells + 0.4));
+    const byH = Math.floor((H - 170) / (n + clueCells * 1.1 + 0.4));
+    const max = { 5: 60, 10: 48, 15: 40, 20: 34 }[n] || 34;
+    const cell = Math.max(22, Math.min(max, byW, Math.max(byH, 32)));  // на низком экране не меньше 32, лучше прокрутить страницу
     document.documentElement.style.setProperty('--cell', cell + 'px');
   }
 
