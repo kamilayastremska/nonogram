@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Нонограммы</title>
+<style>
+  :root {
+    --bg: #e8edf1;
+    --paper: #fbfcfd;
+    --ink: #1d2848;
+    --grid: #c3ccd6;
+    --grid-strong: #6f7c91;
+    --mark: #c4492f;
+    --done: #9aa5b4;
+    --accent: #2f6fed;
+    --text: #1d2848;
+    --cell: 32px;
+  }
+  :root { color-scheme: light; }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12171f;
+    --paper: #1a212c;
+    --ink: #dbe4f5;
+    --grid: #2e3846;
+    --grid-strong: #667489;
+    --mark: #ff7a5c;
+    --done: #55617a;
+    --accent: #6a9bff;
+    --text: #dbe4f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #12171f;
+    --paper: #1a212c;
+    --ink: #dbe4f5;
+    --grid: #2e3846;
+    --grid-strong: #667489;
+    --mark: #ff7a5c;
+    --done: #55617a;
+    --accent: #6a9bff;
+    --text: #dbe4f5;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 12px 40px;
+  }
+  h1 { margin: 0 0 6px; font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em; }
+  h2 { margin: 0 0 14px; font-size: 1.3rem; font-weight: 700; }
+  .sub { margin: 0 0 22px; opacity: .7; font-size: .95rem; text-align: center; max-width: 380px; line-height: 1.45; }
+
+  button {
+    font: inherit; color: var(--text);
+    background: var(--paper);
+    border: 1.5px solid var(--grid-strong);
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  button.toggle[aria-pressed="true"] { background: var(--mark); border-color: var(--mark); color: #fff; }
+
+  /* ---------- титульный экран ---------- */
+  #title { display: flex; flex-direction: column; align-items: center; }
+  .art { --cell: 26px; margin-bottom: 22px; pointer-events: none; }
+  .art .cell.f { background: var(--mark); }
+  .levels {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px; width: min(100%, 380px);
+  }
+  .level { padding: 16px 14px; font-size: 1.05rem; font-weight: 700; }
+  .level:hover { background: var(--ink); color: var(--paper); }
+
+  /* шестерёнка в правом верхнем углу */
+  #gear {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    width: 42px; height: 42px; padding: 0;
+    display: grid; place-items: center;
+  }
+  #gear svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- игра ---------- */
+  #play { display: flex; flex-direction: column; align-items: center; }
+  .status {
+    display: flex; gap: 16px; justify-content: center; align-items: baseline;
+    margin-bottom: 14px; min-height: 1.5em;
+  }
+  /* кисть нужна только на сенсорных экранах */
+  #mode { display: none; margin-top: 14px; }
+  @media (pointer: coarse) { #mode { display: inline-block; } }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 14px; border-top: 1.5px solid var(--grid); }
+  #timer, #errs { font-variant-numeric: tabular-nums; font-weight: 600; }
+  #timer { min-width: 52px; text-align: center; }
+  #errs { color: var(--mark); }
+
+  .game {
+    display: grid;
+    grid-template-columns: auto auto;
+    background: var(--paper);
+    padding: 10px;
+    border: 2px solid var(--grid-strong);
+    border-radius: 4px;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .col-clues { display: flex; }
+  .col-clue {
+    width: var(--cell);
+    display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+    padding-bottom: 4px;
+    font-size: calc(var(--cell) * .42);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.25;
+  }
+  .row-clues { display: flex; flex-direction: column; }
+  .row-clue {
+    height: var(--cell);
+    display: flex; justify-content: flex-end; align-items: center; gap: .45em;
+    padding-right: 8px;
+    font-size: calc(var(--cell) * .42);
+    font-variant-numeric: tabular-nums;
+  }
+  .col-clue.sep { border-left: 2px solid var(--grid-strong); }
+  .row-clue.sep { border-top: 2px solid var(--grid-strong); }
+  .done { color: var(--done); text-decoration: line-through; }
+
+  .board {
+    display: grid;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    border: 2px solid var(--grid-strong);
+  }
+  .cell {
+    width: var(--cell); height: var(--cell);
+    border: 1px solid var(--grid);
+    position: relative;
+    cursor: pointer;
+  }
+  .cell.r5 { border-right: 2px solid var(--grid-strong); }
+  .cell.b5 { border-bottom: 2px solid var(--grid-strong); }
+  .cell.f { background: var(--ink); }
+  .cell.x::before, .cell.x::after {
+    content: ""; position: absolute; left: 22%; right: 22%; top: 50%;
+    height: 2px; background: var(--mark);
+  }
+  .cell.x::before { transform: rotate(45deg); }
+  .cell.x::after  { transform: rotate(-45deg); }
+  /* ошибки: неверно закрашенная клетка красная, неверный крестик на розовом фоне */
+  .cell.f.err { background: var(--mark); }
+  .cell.x.err { background: color-mix(in srgb, var(--mark) 28%, transparent); }
+  .board.won .cell { cursor: default; }
+
+  #msg { margin-top: 16px; min-height: 1.6em; font-weight: 600; font-size: 1.05rem; text-align: center; }
+  .help { margin-top: 10px; font-size: .85rem; opacity: .7; text-align: center; max-width: 440px; line-height: 1.45; }
+
+  /* ---------- настройки ---------- */
+  dialog {
+    position: fixed; margin: 0; inset: 64px 16px auto auto;
+    background: var(--paper); color: var(--text);
+    border: 2px solid var(--grid-strong); border-radius: 8px;
+    padding: 16px 20px; width: min(92vw, 340px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
+    z-index: 10;
+  }
+  @media (max-width: 560px) {
+    dialog { inset: auto 12px 12px 12px; width: auto; }
+  }
+  .seg { display: flex; gap: 0; margin: 4px 0 6px; }
+  .seg button { flex: 1; border-radius: 0; margin-left: -1.5px; padding: 6px 8px; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); position: relative; z-index: 1; }
+  .group-title { display: block; font-weight: 700; margin-top: 2px; }
+  dialog h2 { margin-bottom: 12px; }
+  .opt { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; cursor: pointer; }
+  .opt input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); flex: none; }
+  .opt b { display: block; }
+  .opt small { display: block; opacity: .7; line-height: 1.4; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<button id="gear" aria-label="Настройки" title="Настройки">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+</button>
+
+<!-- ===== Титульный экран ===== -->
+<section id="title">
+  <div class="game art" id="art" aria-hidden="true">
+    <div></div>
+    <div class="col-clues" id="artCols"></div>
+    <div class="row-clues" id="artRows"></div>
+    <div class="board" id="artBoard"></div>
+  </div>
+  <h1>Нонограммы</h1>
+  <p class="sub">Японские кроссворды. Числа рядом с полем показывают, сколько клеток подряд закрашено в строке или столбце. Закрась всё правильно, и появится картинка.</p>
+  <div class="levels">
+    <button class="level" data-level="easy">Лёгкий</button>
+    <button class="level" data-level="medium">Средний</button>
+    <button class="level" data-level="hard">Сложный</button>
+    <button class="level" data-level="expert">Эксперт</button>
+  </div>
+</section>
+
+<!-- ===== Игра ===== -->
+<section id="play" hidden>
+  <h2 id="levelName"></h2>
+  <div class="status">
+    <span id="timer">0:00</span>
+    <span id="errs">Ошибки: 0</span>
+  </div>
+
+  <div class="game" id="game">
+    <div></div>
+    <div class="col-clues" id="colClues"></div>
+    <div class="row-clues" id="rowClues"></div>
+    <div class="board" id="board"></div>
+  </div>
+
+  <button id="mode" class="toggle" aria-pressed="false">Кисть: ■ закраска</button>
+  <div id="msg" role="status"></div>
+  <p class="help">Левая кнопка мыши закрашивает клетку, правая ставит крестик. Можно вести мышью. На телефоне кнопка «Кисть» переключает закраску и крестик.</p>
+</section>
+
+<!-- ===== Настройки ===== -->
+<dialog id="settings">
+  <h2>Настройки</h2>
+  <span class="group-title">Тема</span>
+  <div class="seg" id="themeSeg" role="group" aria-label="Тема">
+    <button data-theme-btn="auto" aria-pressed="false">Авто</button>
+    <button data-theme-btn="light" aria-pressed="false">Светлая</button>
+    <button data-theme-btn="dark" aria-pressed="false">Тёмная</button>
+  </div>
+  <label class="opt">
+    <input type="checkbox" id="optErrors">
+    <span><b>Показывать ошибки</b><small>Неверная клетка подсвечивается красным, ошибки считаются.</small></span>
+  </label>
+  <label class="opt">
+    <input type="checkbox" id="optTimer">
+    <span><b>Показывать таймер</b></span>
+  </label>
+  <div class="actions" id="gameActions">
+    <button id="menu">В меню</button>
+    <button id="reset">Сбросить</button>
+    <button id="new" class="primary">Новая игра</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const titleEl = $('title'), playEl = $('play');
+  const boardEl = $('board'), colEl = $('colClues'), rowEl = $('rowClues');
+  const msgEl = $('msg'), timerEl = $('timer'), errsEl = $('errs'), modeBtn = $('mode');
+
+  const LEVELS = {
+    easy:   { name: 'Лёгкий',   n: 5,  p: 0.62 },
+    medium: { name: 'Средний',  n: 10, p: 0.58 },
+    hard:   { name: 'Сложный',  n: 15, p: 0.55 },
+    expert: { name: 'Эксперт',  n: 20, p: 0.52 }
+  };
+
+  // ---------- настройки (хранятся в браузере) ----------
+  const SKEY = 'nonogram-settings';
+  const settings = { errors: true, timer: true, theme: 'auto' };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem(SKEY) || '{}')); } catch (e) {}
+  const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) {} };
+
+  let level = LEVELS.medium, n = 10, unique = true, mistakes = 0;
+  let solution = [], grid = [], rowC = [], colC = [];
+  let cells = [], won = false, xMode = false;
+  let timerId = null, seconds = 0;
+
+  // ---------- логика ----------
+  const runs = line => {
+    const out = []; let k = 0;
+    for (const v of line) {
+      if (v === 1) k++;
+      else if (k) { out.push(k); k = 0; }
+    }
+    if (k) out.push(k);
+    return out.length ? out : [0];
+  };
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const column = (g, c) => g.map(row => row[c]);
+  const filled = line => line.map(v => (v === 1 ? 1 : 0));
+
+  // <solver>
+  // Решает одну строку: known[i] = -1 (неизвестно), 0 или 1.
+  // Возвращает уточнённую строку или null при противоречии.
+  function solveLine(clue, known) {
+    const L = known.length;
+    const and = Array(L).fill(1), or = Array(L).fill(0), cur = Array(L).fill(0);
+    let count = 0;
+    const need = clue.map((_, k) => clue.slice(k).reduce((a, b) => a + b + 1, -1));
+    function place(j, pos) {
+      if (j === clue.length) {
+        for (let i = pos; i < L; i++) if (known[i] === 1) return;
+        for (let i = pos; i < L; i++) cur[i] = 0;
+        count++;
+        for (let i = 0; i < L; i++) { and[i] &= cur[i]; or[i] |= cur[i]; }
+        return;
+      }
+      const len = clue[j], maxStart = L - need[j];
+      for (let s = pos; s <= maxStart; s++) {
+        if (s > pos && known[s - 1] === 1) break;
+        let ok = true;
+        for (let i = s; i < s + len; i++) if (known[i] === 0) { ok = false; break; }
+        if (!ok) continue;
+        if (s + len < L && known[s + len] === 1) continue;
+        for (let i = pos; i < s; i++) cur[i] = 0;
+        for (let i = s; i < s + len; i++) cur[i] = 1;
+        if (s + len < L) cur[s + len] = 0;
+        place(j + 1, s + len + 1);
+      }
+    }
+    place(0, 0);
+    if (!count) return null;
+    return and.map((a, i) => (a ? 1 : or[i] ? -1 : 0));
+  }
+
+  // Решает головоломку «по строкам и столбцам». complete = true, если решение однозначно найдено.
+  function solvePuzzle(rc, cc, size) {
+    const g = Array.from({ length: size }, () => Array(size).fill(-1));
+    const rcl = rc.map(a => a.filter(v => v > 0)), ccl = cc.map(a => a.filter(v => v > 0));
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let r = 0; r < size; r++) {
+        const res = solveLine(rcl[r], g[r]);
+        if (!res) return { grid: g, complete: false };
+        for (let c = 0; c < size; c++) if (g[r][c] !== res[c]) { g[r][c] = res[c]; changed = true; }
+      }
+      for (let c = 0; c < size; c++) {
+        const res = solveLine(ccl[c], g.map(row => row[c]));
+        if (!res) return { grid: g, complete: false };
+        for (let r = 0; r < size; r++) if (g[r][c] !== res[r]) { g[r][c] = res[r]; changed = true; }
+      }
+    }
+    return { grid: g, complete: g.every(row => row.every(v => v !== -1)) };
+  }
+
+  // Случайная картинка, которую можно решить логикой: решение единственное,
+  // поэтому «ошибки» всегда честные.
+  function generateUnique(size, p) {
+    const sol = Array.from({ length: size }, () =>
+      Array.from({ length: size }, () => (Math.random() < p ? 1 : 0)));
+    for (let it = 0; it < 400; it++) {
+      const rc = sol.map(runs), cc = sol[0].map((_, c) => runs(column(sol, c)));
+      const res = solvePuzzle(rc, cc, size);
+      if (res.complete) return { sol, unique: true };
+      const un = [];
+      res.grid.forEach((row, r) => row.forEach((v, c) => { if (v === -1) un.push([r, c]); }));
+      const k = Math.max(1, Math.floor(un.length / 5));
+      for (let i = 0; i < k && un.length; i++) {
+        const [r, c] = un.splice(Math.floor(Math.random() * un.length), 1)[0];
+        sol[r][c] ^= 1;
+      }
+    }
+    return { sol, unique: false };
+  }
+  // </solver>
+
+  // ---------- отрисовка (общая для игры и титульной картинки) ----------
+  function render(size, bEl, cEl, rEl, rc, cc) {
+    bEl.style.gridTemplateColumns = `repeat(${size}, var(--cell))`;
+    bEl.innerHTML = ''; cEl.innerHTML = ''; rEl.innerHTML = '';
+    const out = [];
+    for (let r = 0; r < size; r++) {
+      out.push([]);
+      for (let c = 0; c < size; c++) {
+        const d = document.createElement('div');
+        d.className = 'cell' + ((c + 1) % 5 === 0 && c < size - 1 ? ' r5' : '') +
+                              ((r + 1) % 5 === 0 && r < size - 1 ? ' b5' : '');
+        d.dataset.r = r; d.dataset.c = c;
+        bEl.appendChild(d);
+        out[r].push(d);
+      }
+    }
+    cc.forEach((cl, c) => {
+      const d = document.createElement('div');
+      d.className = 'col-clue' + (c > 0 && c % 5 === 0 ? ' sep' : '');
+      d.innerHTML = cl.map(v => `<span>${v}</span>`).join('');
+      cEl.appendChild(d);
+    });
+    rc.forEach((cl, r) => {
+      const d = document.createElement('div');
+      d.className = 'row-clue' + (r > 0 && r % 5 === 0 ? ' sep' : '');
+      d.innerHTML = cl.map(v => `<span>${v}</span>`).join('');
+      rEl.appendChild(d);
+    });
+    return out;
+  }
+
+  function fitCell() {
+    const W = document.documentElement.clientWidth;
+    const cell = Math.max(20, Math.min(32, Math.floor((W - 40) / (1.5 * n))));
+    document.documentElement.style.setProperty('--cell', cell + 'px');
+  }
+
+  // ошибка = закрашена клетка, которой нет в решении, или крестик на клетке из решения
+  const isBad = (r, c) => settings.errors && unique &&
+    ((grid[r][c] === 1 && solution[r][c] !== 1) || (grid[r][c] === 2 && solution[r][c] === 1));
+
+  function paint(r, c) {
+    const el = cells[r][c], v = grid[r][c];
+    el.classList.toggle('f', v === 1);
+    el.classList.toggle('x', v === 2);
+    el.classList.toggle('err', isBad(r, c));
+  }
+  function repaintAll() {
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) paint(r, c);
+  }
+  function updateErrs() { errsEl.textContent = `Ошибки: ${mistakes}`; }
+
+  function refreshClues() {
+    [...rowEl.children].forEach((el, r) =>
+      el.classList.toggle('done', same(runs(filled(grid[r])), rowC[r])));
+    [...colEl.children].forEach((el, c) =>
+      el.classList.toggle('done', same(runs(filled(column(grid, c))), colC[c])));
+  }
+
+  function solved() {
+    for (let r = 0; r < n; r++)
+      if (!same(runs(filled(grid[r])), rowC[r])) return false;
+    for (let c = 0; c < n; c++)
+      if (!same(runs(filled(column(grid, c))), colC[c])) return false;
+    return true;
+  }
+
+  // ---------- таймер ----------
+  const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  function startTimer() {
+    clearInterval(timerId); seconds = 0; timerEl.textContent = fmt(0);
+    timerId = setInterval(() => { seconds++; timerEl.textContent = fmt(seconds); }, 1000);
+  }
+
+  // ---------- настройки: применение ----------
+  function applySettings() {
+    timerEl.hidden = !settings.timer;
+    errsEl.hidden = !settings.errors || !unique;
+    $('optErrors').checked = settings.errors;
+    $('optTimer').checked = settings.timer;
+    $('gameActions').hidden = playEl.hidden;
+    if (settings.theme === 'light' || settings.theme === 'dark')
+      document.documentElement.dataset.theme = settings.theme;
+    else document.documentElement.removeAttribute('data-theme');
+    document.querySelectorAll('[data-theme-btn]').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.themeBtn === settings.theme));
+    if (grid.length && cells.length) repaintAll();
+  }
+  const dlg = $('settings');
+  // панель не блокирует игру: настройки меняются прямо во время партии
+  const openSettings = () => { if (dlg.open) dlg.close(); else { applySettings(); dlg.show(); } };
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && dlg.open) dlg.close(); });
+  document.querySelectorAll('[data-theme-btn]').forEach(b => b.addEventListener('click', () => {
+    settings.theme = b.dataset.themeBtn; saveSettings(); applySettings();
+  }));
+  $('gear').onclick = openSettings;
+  $('optErrors').onchange = e => { settings.errors = e.target.checked; saveSettings(); applySettings(); };
+  $('optTimer').onchange = e => { settings.timer = e.target.checked; saveSettings(); applySettings(); };
+
+  // ---------- экраны ----------
+  function showMenu() {
+    clearInterval(timerId);
+    dlg.close();
+    playEl.hidden = true; titleEl.hidden = false;
+    $('gameActions').hidden = true;
+  }
+  function startLevel(key) {
+    level = LEVELS[key];
+    titleEl.hidden = true; playEl.hidden = false;
+    $('levelName').textContent = level.name;
+    newGame();
+  }
+
+  // ---------- игра ----------
+  function newGame() {
+    n = level.n;
+    const g = generateUnique(n, level.p);
+    solution = g.sol; unique = g.unique;
+    rowC = solution.map(runs);
+    colC = solution[0].map((_, c) => runs(column(solution, c)));
+    resetGrid();
+  }
+  function resetGrid() {
+    grid = Array.from({ length: n }, () => Array(n).fill(0));
+    won = false; msgEl.textContent = ''; mistakes = 0; updateErrs();
+    fitCell();
+    cells = render(n, boardEl, colEl, rowEl, rowC, colC);
+    boardEl.classList.remove('won');
+    applySettings(); refreshClues(); startTimer();
+  }
+  function win() {
+    won = true; clearInterval(timerId);
+    boardEl.classList.add('won');
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+      if (grid[r][c] === 2) { grid[r][c] = 0; paint(r, c); }
+    let text = 'Готово!';
+    if (settings.timer) text += ` Время: ${fmt(seconds)}.`;
+    if (settings.errors && unique) text += ` Ошибок: ${mistakes}.`;
+    msgEl.textContent = text;
+  }
+
+  // ---------- ввод ----------
+  let drawing = false, target = 0, tool = 1;
+
+  function apply(r, c) {
+    const cur = grid[r][c];
+    // не затираем клетки другого типа
+    if (tool === 1 && cur === 2) return;
+    if (tool === 2 && cur === 1) return;
+    if (cur === target) return;
+    grid[r][c] = target;
+    if (target !== 0 && isBad(r, c)) { mistakes++; updateErrs(); }
+    paint(r, c);
+  }
+  function cellAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el && el.classList.contains('cell') && boardEl.contains(el) ? el : null;
+  }
+
+  boardEl.addEventListener('contextmenu', e => e.preventDefault());
+  boardEl.addEventListener('pointerdown', e => {
+    if (won) return;
+    const el = e.target.closest('.cell'); if (!el) return;
+    e.preventDefault();
+    tool = (e.button === 2 || xMode) ? 2 : 1;
+    const r = +el.dataset.r, c = +el.dataset.c;
+    target = grid[r][c] === tool ? 0 : tool;
+    drawing = true;
+    apply(r, c);
+  });
+  boardEl.addEventListener('pointermove', e => {
+    if (!drawing) return;
+    const el = cellAt(e.clientX, e.clientY);
+    if (el) apply(+el.dataset.r, +el.dataset.c);
+  });
+  const stop = () => {
+    if (!drawing) return;
+    drawing = false;
+    refreshClues();
+    if (solved()) win();
+  };
+  window.addEventListener('pointerup', stop);
+  window.addEventListener('pointercancel', stop);
+  window.addEventListener('resize', () => { if (!playEl.hidden) fitCell(); });
+
+  document.querySelectorAll('.level').forEach(b =>
+    b.addEventListener('click', () => startLevel(b.dataset.level)));
+  $('menu').onclick = showMenu;
+  $('new').onclick = () => { dlg.close(); newGame(); };
+  $('reset').onclick = () => { dlg.close(); resetGrid(); };
+  modeBtn.onclick = () => {
+    xMode = !xMode;
+    modeBtn.setAttribute('aria-pressed', xMode);
+    modeBtn.textContent = xMode ? 'Кисть: ✕ крестик' : 'Кисть: ■ закраска';
+  };
+
+  // ---------- титульная картинка: сердце, нарисованное как нонограмма ----------
+  const ART = [
+    '0000000000',
+    '0110000110',
+    '1111001111',
+    '1111111111',
+    '1111111111',
+    '0111111110',
+    '0011111100',
+    '0001111000',
+    '0000110000',
+    '0000000000'
+  ].map(s => [...s].map(Number));
+
+  (function drawArt() {
+    const rc = ART.map(runs), cc = ART[0].map((_, c) => runs(column(ART, c)));
+    const ac = render(10, $('artBoard'), $('artCols'), $('artRows'), rc, cc);
+    const todo = [];
+    ART.forEach((row, r) => row.forEach((v, c) => { if (v) todo.push(ac[r][c]); }));
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    todo.forEach((el, i) => {
+      if (still) el.classList.add('f');
+      else setTimeout(() => el.classList.add('f'), 350 + i * 28);
+    });
+  })();
+
+  applySettings();
+})();
+</script>
+</body>
+</html>
